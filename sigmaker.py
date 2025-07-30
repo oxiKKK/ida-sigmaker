@@ -52,6 +52,7 @@ USE_QIS_SIGNATURE = False  # _IsAVX2Available()  # TODO: add this later
 PRINT_TOP_X = 5
 MAX_SINGLE_SIGNATURE_LENGTH = 1000
 MAX_XREF_SIGNATURE_LENGTH = 250
+WILDCARD_BYTE_VALUE = 0xCC  # Default wildcard byte value
 FILE_BUFFER = None
 PROCESSOR_ARCH = ida_idp.ph_get_id()  # Check what processor we have
 WILDCARD_OPTIMIZED_INSTRUCTION = True
@@ -282,7 +283,7 @@ def BuildByteArrayWithMaskSignatureString(signature: Signature) -> str:
     pattern = []
     mask = []
     for byte in signature:
-        pattern.append(f"\\x{byte.value:02X}" if not byte.isWildcard else "\\x00")
+        pattern.append(f"\\x{byte.value:02X}" if not byte.isWildcard else f"\\x{WILDCARD_BYTE_VALUE:02X}")
         mask.append("x" if not byte.isWildcard else "?")
     return "".join(pattern) + " " + "".join(mask)
 
@@ -291,7 +292,7 @@ def BuildBytesWithBitmaskSignatureString(signature: Signature) -> str:
     pattern = []
     mask = []
     for byte in signature:
-        pattern.append(f"0x{byte.value:02X}, " if not byte.isWildcard else "0x00, ")
+        pattern.append(f"0x{byte.value:02X}, " if not byte.isWildcard else f"0x{WILDCARD_BYTE_VALUE:02X}, ")
         mask.append("1" if not byte.isWildcard else "0")
     pattern_str = "".join(pattern).rstrip(", ")
     mask_str = "".join(mask)[::-1]  # Reverse the bitmask
@@ -454,6 +455,7 @@ Options
 <#Print top X shortest signatures when generating xref signatures#Print top X XREF signatures     :{opt1}>
 <#Stop after reaching X bytes when generating a single signature#Maximum single signature length :{opt2}>
 <#Stop after reaching X bytes when generating xref signatures#Maximum xref signature length   :{opt3}>
+<#Byte value to use for wildcards in byte array outputs (e.g., 0x00, 0xCC, 0xFF)#Wildcard byte value (hex)       :{opt4}>
 """
 
         # Define numerical input fields (corresponding to `u` in C++)
@@ -461,6 +463,7 @@ Options
             "opt1": F.NumericInput(tp=F.FT_DEC),  # PRINT_TOP_X
             "opt2": F.NumericInput(tp=F.FT_DEC),  # MAX_SINGLE_SIGNATURE_LENGTH
             "opt3": F.NumericInput(tp=F.FT_DEC),  # MAX_XREF_SIGNATURE_LENGTH
+            "opt4": F.NumericInput(tp=F.FT_HEX),  # WILDCARD_BYTE_VALUE
         }
 
         # Initialize form
@@ -468,12 +471,13 @@ Options
 
     def ExecuteForm(self):
         """Execute the form and apply changes."""
-        global PRINT_TOP_X, MAX_SINGLE_SIGNATURE_LENGTH, MAX_XREF_SIGNATURE_LENGTH
+        global PRINT_TOP_X, MAX_SINGLE_SIGNATURE_LENGTH, MAX_XREF_SIGNATURE_LENGTH, WILDCARD_BYTE_VALUE
 
         # Pre-fill form values
         self.controls["opt1"].value = PRINT_TOP_X
         self.controls["opt2"].value = MAX_SINGLE_SIGNATURE_LENGTH
         self.controls["opt3"].value = MAX_XREF_SIGNATURE_LENGTH
+        self.controls["opt4"].value = WILDCARD_BYTE_VALUE
 
         result = self.Execute()
         # Show form
@@ -485,6 +489,7 @@ Options
         PRINT_TOP_X = self.controls["opt1"].value
         MAX_SINGLE_SIGNATURE_LENGTH = self.controls["opt2"].value
         MAX_XREF_SIGNATURE_LENGTH = self.controls["opt3"].value
+        WILDCARD_BYTE_VALUE = self.controls["opt4"].value & 0xFF  # Ensure it's a valid byte value
         self.Free()
         return result
 
@@ -796,7 +801,7 @@ class PySigMaker(ida_idaapi.plugin_t):
         pattern = []
         for token in tokens:
             if "?" in token:
-                pattern.append((0, True))
+                pattern.append((WILDCARD_BYTE_VALUE, True))
             else:
                 try:
                     val = int(token, 16)
