@@ -283,7 +283,11 @@ def BuildByteArrayWithMaskSignatureString(signature: Signature) -> str:
     pattern = []
     mask = []
     for byte in signature:
-        pattern.append(f"\\x{byte.value:02X}" if not byte.isWildcard else f"\\x{WILDCARD_BYTE_VALUE:02X}")
+        pattern.append(
+            f"\\x{byte.value:02X}"
+            if not byte.isWildcard
+            else f"\\x{WILDCARD_BYTE_VALUE:02X}"
+        )
         mask.append("x" if not byte.isWildcard else "?")
     return "".join(pattern) + " " + "".join(mask)
 
@@ -292,7 +296,11 @@ def BuildBytesWithBitmaskSignatureString(signature: Signature) -> str:
     pattern = []
     mask = []
     for byte in signature:
-        pattern.append(f"0x{byte.value:02X}, " if not byte.isWildcard else f"0x{WILDCARD_BYTE_VALUE:02X}, ")
+        pattern.append(
+            f"0x{byte.value:02X}, "
+            if not byte.isWildcard
+            else f"0x{WILDCARD_BYTE_VALUE:02X}, "
+        )
         mask.append("1" if not byte.isWildcard else "0")
     pattern_str = "".join(pattern).rstrip(", ")
     mask_str = "".join(mask)[::-1]  # Reverse the bitmask
@@ -455,7 +463,6 @@ Options
 <#Print top X shortest signatures when generating xref signatures#Print top X XREF signatures     :{opt1}>
 <#Stop after reaching X bytes when generating a single signature#Maximum single signature length :{opt2}>
 <#Stop after reaching X bytes when generating xref signatures#Maximum xref signature length   :{opt3}>
-<#Byte value to use for wildcards in byte array outputs (e.g., 0x00, 0xCC, 0xFF)#Wildcard byte value (hex)       :{opt4}>
 """
 
         # Define numerical input fields (corresponding to `u` in C++)
@@ -463,7 +470,6 @@ Options
             "opt1": F.NumericInput(tp=F.FT_DEC),  # PRINT_TOP_X
             "opt2": F.NumericInput(tp=F.FT_DEC),  # MAX_SINGLE_SIGNATURE_LENGTH
             "opt3": F.NumericInput(tp=F.FT_DEC),  # MAX_XREF_SIGNATURE_LENGTH
-            "opt4": F.NumericInput(tp=F.FT_HEX),  # WILDCARD_BYTE_VALUE
         }
 
         # Initialize form
@@ -471,13 +477,12 @@ Options
 
     def ExecuteForm(self):
         """Execute the form and apply changes."""
-        global PRINT_TOP_X, MAX_SINGLE_SIGNATURE_LENGTH, MAX_XREF_SIGNATURE_LENGTH, WILDCARD_BYTE_VALUE
+        global PRINT_TOP_X, MAX_SINGLE_SIGNATURE_LENGTH, MAX_XREF_SIGNATURE_LENGTH
 
         # Pre-fill form values
         self.controls["opt1"].value = PRINT_TOP_X
         self.controls["opt2"].value = MAX_SINGLE_SIGNATURE_LENGTH
         self.controls["opt3"].value = MAX_XREF_SIGNATURE_LENGTH
-        self.controls["opt4"].value = WILDCARD_BYTE_VALUE
 
         result = self.Execute()
         # Show form
@@ -489,7 +494,6 @@ Options
         PRINT_TOP_X = self.controls["opt1"].value
         MAX_SINGLE_SIGNATURE_LENGTH = self.controls["opt2"].value
         MAX_XREF_SIGNATURE_LENGTH = self.controls["opt3"].value
-        WILDCARD_BYTE_VALUE = self.controls["opt4"].value & 0xFF  # Ensure it's a valid byte value
         self.Free()
         return result
 
@@ -513,13 +517,14 @@ Select action:
 Output format:
 <#Example - E8 ? ? ? ? 45 33 F6 66 44 89 34 33#IDA Signature:{rIDASig}>
 <#Example - E8 ?? ?? ?? ?? 45 33 F6 66 44 89 34 33#x64Dbg Signature:{rx64DbgSig}>
-<#Example - \\xE8\\x00\\x00\\x00\\x00\\x45\\x33\\xF6\\x66\\x44\\x89\\x34\\x33 x????xxxxxxxx#C Byte Array String Signature + String mask:{rByteArrayMaskSig}>
+<#Example - \\xE8\\x00\\x00\\x00\\x00\\x45\\x33\\xF6\\x66\\x44\\x89\\x34\\x33 x????xxxxxxxx (or \\xE8\\x2A\\x2A\\x2A\\x2A\\x45...)#C Byte Array String Signature (mask optional):{rByteArrayMaskSig}>
 <#Example - 0xE8, 0x00, 0x00, 0x00, 0x00, 0x45, 0x33, 0xF6, 0x66, 0x44, 0x89, 0x34, 0x33 0b1111111100001#C Bytes Signature + Bitmask:{rRawBytesBitmaskSig}>{rOutputFormat}>
 
 Quick Options:
 <#Enable wildcarding for operands, to improve stability of created signatures#Wildcards for operands:{cWildcardOperands}>
 <#Don't stop signature generation when reaching end of function#Continue when leaving function scope:{cContinueOutside}>
 <#Wildcard the whole instruction when the operand (usually a register) is encoded into the operator#Wildcard optimized / combined instructions:{cWildcardOptimized}>{cGroupOptions}>
+<#Byte value used for wildcard bytes in byte array outputs and no-mask byte-array searches (e.g., 0x00, 0x2A, 0xCC, 0xFF)#Wildcard byte value (hex):{iWildcardByteValue}>
 
 <Operand types...:{bOperandTypes}><Other options...:{bOtherOptions}>
 """
@@ -543,6 +548,8 @@ Quick Options:
             # Buttons for further configuration.
             "bOperandTypes": F.ButtonInput(self.ConfigureOperandWildcardBitmask),
             "bOtherOptions": F.ButtonInput(self.ConfigureOptions),
+            # Main wildcard-byte setting.
+            "iWildcardByteValue": F.NumericInput(tp=F.FT_HEX),
         }
         super().__init__(form_text, controls)
 
@@ -578,6 +585,34 @@ Quick Options:
         form = ConfigureOptionsForm()
         form.Compile()
         return form.ExecuteForm()
+
+
+class SearchSignatureForm(ida_kernwin.Form):
+    def __init__(self, signature_label: str, mask_enabled: bool):
+        F = ida_kernwin.Form
+        mask_label = "Enter mask"
+        label_width = max(len(signature_label), len(mask_label))
+        signature_label = signature_label.ljust(label_width)
+        mask_label = mask_label.ljust(label_width)
+        form_text = f"""BUTTON YES* Search
+BUTTON CANCEL Cancel
+Search signature
+{{FormChangeCb}}
+<{signature_label}:{{iSearchSignature}}>
+<{mask_label}:{{iSearchMask}}>
+"""
+        controls = {
+            "FormChangeCb": F.FormChangeCb(self.OnFormChange),
+            "iSearchSignature": F.StringInput(swidth=50),
+            "iSearchMask": F.StringInput(swidth=50),
+        }
+        super().__init__(form_text, controls)
+        self.mask_enabled = mask_enabled
+
+    def OnFormChange(self, fid):
+        if fid == -1:
+            self.EnableField(self.iSearchMask, self.mask_enabled)
+        return 1
 
 
 # -------------------------
@@ -635,7 +670,6 @@ def set_wildcardable_operand_type_bitmask():
 
 
 class _ActionHandler(idaapi.action_handler_t):
-
     def __init__(self, action_function):
         super().__init__()
         self.action_function = action_function
@@ -655,7 +689,6 @@ def is_disassembly_widget(widget, popup, ctx):
 
 
 class _PopupHook(idaapi.UI_Hooks):
-
     def __init__(
         self, action_name, predicate=None, widget_populator=None, category=None
     ):
@@ -962,7 +995,7 @@ class PySigMaker(ida_idaapi.plugin_t):
 
             current_address += current_instruction_length
 
-            #idc.msg(f"Calling idaapi.get_func with {current_address:#x}\n")
+            # idc.msg(f"Calling idaapi.get_func with {current_address:#x}\n")
 
             try:
                 if (
@@ -1124,7 +1157,7 @@ class PySigMaker(ida_idaapi.plugin_t):
         for i in range(top_length):
             origin_address, signature = xref_signatures[i]
             sig_str = FormatSignature(signature, sig_type)
-            idc.msg(f"XREF Signature #{i+1} @ {origin_address:X}: {sig_str}\n")
+            idc.msg(f"XREF Signature #{i + 1} @ {origin_address:X}: {sig_str}\n")
             if i == 0:
                 SetClipboardText(sig_str)
 
@@ -1145,6 +1178,66 @@ class PySigMaker(ida_idaapi.plugin_t):
         sig_str = FormatSignature(signature, sig_type)
         idc.msg(f"Code for {start:X}-{end:X}: {sig_str}\n")
         SetClipboardText(sig_str)
+
+    def _ConvertRawBytePatternWithoutMask(self, input_str: str) -> str:
+        raw_byte_strings = []
+        if not GetRegexMatches(
+            input_str,
+            re.compile(r"\\x[0-9A-F]{2}", re.IGNORECASE),
+            raw_byte_strings,
+        ):
+            return ""
+
+        wildcard_values = {WILDCARD_BYTE_VALUE, 0x2A}
+        has_wildcards = False
+        converted_signature = []
+
+        for raw_byte in raw_byte_strings:
+            value = int(raw_byte[2:], 16)
+            is_wildcard = value in wildcard_values
+            has_wildcards = has_wildcards or is_wildcard
+            converted_signature.append(SignatureByte(value, is_wildcard))
+
+        if has_wildcards:
+            return BuildIDASignatureString(converted_signature)
+        return " ".join(f"{byte.value:02X}" for byte in converted_signature)
+
+    def _AskSearchSignatureInput(self, sig_type: SignatureType):
+        use_mask = sig_type in {
+            SignatureType.Signature_Mask,
+            SignatureType.SignatureByteArray_Bitmask,
+        }
+
+        signature_label = "Enter signature"
+        if sig_type == SignatureType.Signature_Mask:
+            signature_label = "Enter byte array signature"
+        elif sig_type == SignatureType.SignatureByteArray_Bitmask:
+            signature_label = "Enter bytes signature"
+
+        form = SearchSignatureForm(signature_label, use_mask)
+        form.Compile()
+
+        ok = form.Execute()
+        if ok != 1:
+            form.Free()
+            return None
+
+        input_signature = form.iSearchSignature.value.strip()
+        input_mask = form.iSearchMask.value.strip() if use_mask else ""
+        form.Free()
+
+        if not input_signature:
+            return ""
+
+        if (
+            sig_type == SignatureType.SignatureByteArray_Bitmask
+            and input_mask
+            and not input_mask.startswith("0b")
+            and re.fullmatch(r"[01]+", input_mask)
+        ):
+            input_mask = "0b" + input_mask
+
+        return f"{input_signature} {input_mask}" if input_mask else input_signature
 
     def SearchSignatureString(self, input_str: str):
         converted_signature_string = ""
@@ -1175,7 +1268,7 @@ class PySigMaker(ida_idaapi.plugin_t):
                 )
             elif GetRegexMatches(
                 input_str,
-                re.compile(r"(?:0x[0-9A-F]{2})+", re.IGNORECASE),
+                re.compile(r"0x[0-9A-F]{2}", re.IGNORECASE),
                 raw_byte_strings,
             ) and len(raw_byte_strings) == len(string_mask):
                 converted_signature = []
@@ -1190,13 +1283,17 @@ class PySigMaker(ida_idaapi.plugin_t):
                     f'Detected mask "{string_mask}" but failed to match corresponding bytes\n'
                 )
         else:
-            # Remove extraneous characters and normalize
-            s = re.sub(r"[\)\(\[\]]+", "", input_str)
-            s = re.sub(r"^\s+", "", s)
-            s = re.sub(r"[? ]+$", "", s) + " "
-            s = re.sub(r"\\?\\x", "", s)
-            s = re.sub(r"\s+", " ", s)
-            converted_signature_string = s
+            converted_signature_string = self._ConvertRawBytePatternWithoutMask(
+                input_str
+            )
+            if not converted_signature_string:
+                # Remove extraneous characters and normalize
+                s = re.sub(r"[\)\(\[\]]+", "", input_str)
+                s = re.sub(r"^\s+", "", s)
+                s = re.sub(r"[? ]+$", "", s) + " "
+                s = re.sub(r"\\?\\x", "", s)
+                s = re.sub(r"\s+", " ", s)
+                converted_signature_string = s
 
         if not converted_signature_string:
             idc.msg("Unrecognized signature type\n")
@@ -1218,6 +1315,7 @@ class PySigMaker(ida_idaapi.plugin_t):
     # Main plugin UI and dispatch
     # -------------------------
     def run_plugin(self, ctx=None):
+        global WILDCARD_BYTE_VALUE
         # Determine processor type and set globals.
         self.IS_ARM = self.IsARM()
 
@@ -1226,6 +1324,7 @@ class PySigMaker(ida_idaapi.plugin_t):
         # Show the main form.
         form = SignatureMakerForm()
         form.Compile()
+        form.iWildcardByteValue.value = WILDCARD_BYTE_VALUE
         ok = form.Execute()
         if not ok:
             form.Free()
@@ -1236,6 +1335,7 @@ class PySigMaker(ida_idaapi.plugin_t):
         wildcard_operands = form.cGroupOptions.value & 1
         continue_outside_of_function = form.cGroupOptions.value & 2
         wildcard_optimized = form.cGroupOptions.value & 4
+        WILDCARD_BYTE_VALUE = form.iWildcardByteValue.value & 0xFF
 
         # If the configuration buttons were pressed, they may have updated globals.
         form.Free()
@@ -1285,9 +1385,7 @@ class PySigMaker(ida_idaapi.plugin_t):
                     idc.msg("Select a range to copy the code!\n")
             elif action == 3:
                 # Search for a signature.
-                input_signature = idaapi.ask_str(
-                    "", idaapi.HIST_SRCH, "Enter a signature"
-                )
+                input_signature = self._AskSearchSignatureInput(sig_type)
                 if input_signature:
                     with self.progress_dialog("Searching..."):
                         self.SearchSignatureString(input_signature)
@@ -1341,3 +1439,9 @@ def get_selected_addresses(ctx):
 
 def PLUGIN_ENTRY():
     return PySigMaker()
+
+
+if __name__ == "__main__":
+    p = PySigMaker()
+    p.init()
+    p.run(0)
