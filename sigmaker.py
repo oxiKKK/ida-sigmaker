@@ -11,8 +11,11 @@ import enum
 import os
 import platform
 import re
+import subprocess
 import sys
 import traceback
+from ctypes import wintypes as w
+from PySide6.QtWidgets import QApplication
 
 import ida_bytes
 import ida_ida
@@ -104,9 +107,6 @@ class ProgressDialog:
 class Clipboard:
     @staticmethod
     def _set_text_windows(text: str) -> bool:
-        import ctypes.util
-        from ctypes import wintypes as w
-
         GMEM_MOVEABLE = 0x0002
         GMEM_ZEROINIT = 0x0040
         CF_TEXT = 1
@@ -170,8 +170,6 @@ class Clipboard:
 
     @staticmethod
     def _set_text_macos(text: str) -> bool:
-        import subprocess
-
         try:
             process = subprocess.Popen(
                 ["pbcopy"], stdin=subprocess.PIPE, close_fds=True
@@ -184,8 +182,6 @@ class Clipboard:
 
     @staticmethod
     def _set_text_linux(text: str) -> bool:
-        import subprocess
-
         try:
             process = subprocess.Popen(
                 ["xclip", "-selection", "clipboard"],
@@ -199,16 +195,15 @@ class Clipboard:
             return False
 
     @staticmethod
-    def _set_text_pyqt5(text: str) -> bool:
+    def _set_text_pyside6(text: str) -> bool:
         try:
-            from PyQt5.QtWidgets import QApplication
-
-            QApplication.clipboard().setText(text)
+            app = QApplication.instance()
+            if app is None:
+                return False
+            app.clipboard().setText(text)
             return True
-        except ImportError:
-            return False
         except Exception as e:
-            print(f"Error setting clipboard text on PyQt5: {e}")
+            print(f"Error setting clipboard text on PySide6: {e}")
             return False
 
     @classmethod
@@ -217,10 +212,10 @@ class Clipboard:
         Sets the clipboard text on the current operating system.
         Returns True on success, False on failure.
         """
-        # Try to use PyQt5 to set the clipboard text, since
+        # Try to use PySide6 to set the clipboard text, since
         # that is cross-platform and doesn't require any
         # external dependencies.
-        success = cls._set_text_pyqt5(text)
+        success = cls._set_text_pyside6(text)
         if success:
             return success
 
